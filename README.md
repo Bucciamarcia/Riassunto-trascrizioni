@@ -2,6 +2,12 @@
 
 Questo script prende la trascrizione di una riuniuone o altro audio (ad esempio un colloquio su Zoom o conferenza), e fa un riassunto delle parti importanti. Utilizza GPT (3.5 o 4) per leggere la trascrizione, e creare un riassunto o appunti di alta qualità.
 
+## Video di introduzione
+
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=V6EW_woe57g
+" target="_blank"><img src="http://img.youtube.com/vi/V6EW_woe57g/0.jpg" 
+alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>
+
 ## Caratteristiche
 
 - Lo script può usare sia gpt-3.5 che gpt-4. Consigliato gpt-4 per ottenere risultati migliori.
