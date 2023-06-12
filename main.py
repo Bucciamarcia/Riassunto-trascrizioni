@@ -1,62 +1,10 @@
-import openai
-import tiktoken
-import math
-import re
-
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
-    encoding = tiktoken.encoding_for_model(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
-
-def split_transcription(transcription, split_num):
-    # Split the transcription into sentences
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', transcription)
-
-    # Calculate the target number of words per part
-    total_words = sum(len(sentence.split()) for sentence in sentences)
-    target_words_per_part = total_words // split_num
-
-    # Split the sentences into parts
-    parts = []
-    current_part = []
-    current_word_count = 0
-
-    for sentence in sentences:
-        sentence_word_count = len(sentence.split())
-
-        if current_word_count + sentence_word_count <= target_words_per_part:
-            current_part.append(sentence)
-            current_word_count += sentence_word_count
-        else:
-            parts.append(" ".join(current_part))
-            current_part = [sentence]
-            current_word_count = sentence_word_count
-
-    # Add the last part
-    if current_part:
-        parts.append(" ".join(current_part))
-
-    return parts
-
-def call_gpt(engine, argomento, parte):
-    openai.api_key = openaikey
-
-    completion = openai.ChatCompletion.create(
-    model=engine,
-    messages=[
-        {"role": "system", "content": "Sei una superintelligenza artificiale. Il tuo compito è prendere appunti dettagliati di una conferenza."},
-        {"role": "user", "content": f"- Il tuo nome è 'Segretaria AI'. Non fare mai riferimento al tuo nome.\n- Prendi appunti dettagliati e completi della trascrizione della conferenza qui sotto.\n- Il tuo obiettivo è creare un testo semplice da consultare, schematico e dettagliato, che permetta alle persone che non hanno partecipanto alla conferenza di apprendere tutto quello che è successo.\n- Riassumi solo le parti che parlano dell'argomento della conferenza, ignora tutto il resto.\n\nARGOMENTO DELLA CONFERENZA:\n\n{argomento}\n\nTRASCRIZIONE DELLA CONFERENZA:\n\n{parte}\n\nAPPUNTI DETTAGLIATI E COMPLETI:"},
-    ],
-    temperature=0
-    )
-
-    completion = completion.choices[0].message.content
-
-    return completion
-
-with open("openaikey.txt") as f:
-    openaikey = f.read()
+import os
+from langchain import PromptTemplate
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.docstore.document import Document
+from langchain.chains.summarize import load_summarize_chain
+from langchain.text_splitter import TokenTextSplitter
 
 print("Scegli la versione di GPT da usare (consigliato gpt-4):")
 print("1. gpt-3.5-turbo")
@@ -67,44 +15,78 @@ usr_choice = input("Inserisci il numero corrispondente (1 o 2): ")
 if usr_choice == "1":
     print("Hai scelto gpt-3.5-turbo")
     engine = "gpt-3.5-turbo"
-    token_split = 2500
+    chunk_size = 2500
 elif usr_choice == "2":
     print("Hai scelto gpt-4")
     engine = "gpt-4"
-    token_split = 5000
+    chunk_size = 5000
 else:
     print("Hai inserito un numero non valido. Chiusura in corso...")
     exit()
 
 argomento = input("Inserisci l'argomento principale o gli argomenti della trascrizione (gli altri argomenti verranno ignorati. Premi invio quando hai finito): ")
 
-# Open trascrizione.txt
+with open("openaikey.txt") as f:
+    openaikey = f.read()
+
+os.environ["OPENAI_API_KEY"] = openaikey
+
+llm = ChatOpenAI(temperature=0, client=engine)
+
+text_splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=50)
+
+# Apri trascrizione.txt
 with open("trascrizione.txt", "r") as f:
     trascrizione = f.read()
 
-token_trascrizione = num_tokens_from_string(trascrizione, engine)
+# Dividi il documento in parti
+texts = text_splitter.split_text(trascrizione)
 
-print(f"Numero di token della trascrizione: {token_trascrizione}")
+docs = [Document(page_content=t) for t in texts]
 
-if token_trascrizione < token_split:
-    split_num = 1
-else:
-    # Round up
-    split_num = math.ceil(token_trascrizione // token_split)
+# Personalizza il prompt di Langchain con l'argomento della conferenza messo in input
 
-print(f"Diviso la trascrizione in {split_num + 1} parte/i...")
+prompt_argomento = PromptTemplate(
+    input_variables=["argomento", "text"],
+    template="""- Sei un'intelligenza artificiale che prende appunti dettagliati e completi della trascrizione di una conferenza.
+- Il tuo obiettivo è creare un testo semplice da consultare, schematico e dettagliato, che permetta alle persone che non hanno partecipanto alla conferenza di avere tutte le informazioni, come se fossero state presenti.
+- Riassumi solo le parti che parlano dell'argomento della conferenza, ignora tutto il resto.
+- Questa è solo la prima iterazione del riassunto, quindi è molto meglio essere troppo dettagliati piuttosto che troppo poco: è importante includere tutte le informazioni che potrebbero risultare utili in futuro, anche se non sei sicuro.
 
+TRASCRIZIONE DELLA CONFERENZA:
+
+{text}
+
+ARGOMENTO DELLA CONFERENZA:
+
+{argomento}
+
+RIASSUNTO ESTESO:"""
+)
+
+prompt_template = prompt_argomento.format(argomento=argomento, text="{text}")
+
+PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
+refine_template = (
+    "Il tuo lavoro è di creare un riassunto finale, completo ed esteso, delle note di una conferenza.\n"
+    "Ti abbiamo fornito un sommario esistente fino a questo punto:\n\n{existing_answer}\n\n"
+    "Ora abbiamo l'opportunità di migliorare questo sommario esistente"
+    "(solo se necessario) con più contesto qui sotto.\n"
+    "------------\n"
+    "{text}\n"
+    "------------\n"
+    "Dato il nuovo contesto, migliora il sommario esistente."
+    "Se il contesto non è utile, riscrivi il sommario originale esattamente così com'è."
+    "Il tuo lavoro è solo direndere il riassunto più leggibile. Non omettere mai niente: includi sempre tutte le informazioni."
+    "Se opportuno, usa paragrafi, elenchi puntati e numerati, per  rendere il riassunto più leggibile."
+)
+refine_prompt = PromptTemplate(
+    input_variables=["existing_answer", "text"],
+    template=refine_template,
+)
+chain = load_summarize_chain(llm, chain_type="refine", return_intermediate_steps=False, question_prompt=PROMPT, refine_prompt=refine_prompt)
+output_finale = chain({"input_documents": docs}, return_only_outputs=True) # Questo fa partire il processo di riassunto
+
+# Salva il risultato in un file
 with open("output.txt", "w", encoding="utf-8") as f:
-    f.write("")
-
-# Write the file
-parts = split_transcription(trascrizione, split_num)
-for i, part in enumerate(parts):
-    print(f"Riassumendo parte {i + 1}...")
-    riassunto = call_gpt(engine, argomento, part)
-    print(f"Riassunto parte {i + 1} completato. Scrivendo il file...")
-    with open("output.txt", "a", encoding="utf-8") as f:
-        f.write(f"PARTE {i + 1}:\n\n")
-        f.write(riassunto)
-        f.write("\n\n")
-    print(f"Scrittura parte {i + 1} completata.")
+    f.write(output_finale["output_text"])
