@@ -19,7 +19,7 @@ if usr_choice == "1":
 elif usr_choice == "2":
     print("Hai scelto gpt-4")
     engine = "gpt-4"
-    chunk_size = 5000
+    chunk_size = 2500
 else:
     print("Hai inserito un numero non valido. Chiusura in corso...")
     exit()
